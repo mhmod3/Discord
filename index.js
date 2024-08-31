@@ -1,174 +1,186 @@
-const { Client, GatewayIntentBits, Partials } = require('discord.js');
+const { Telegraf } = require('telegraf');
 const axios = require('axios');
+const cheerio = require('cheerio');
 const fs = require('fs');
 const path = require('path');
-const { v4: uuidv4 } = require('uuid');
 const keepAlive = require('./keep_alive.js');
 
-// ضع توكن البوت الخاص بك هنا
-const client = new Client({
-    intents: [
-        GatewayIntentBits.Guilds,
-        GatewayIntentBits.GuildMessages,
-        GatewayIntentBits.MessageContent,
-        GatewayIntentBits.DirectMessages,
-    ],
-    partials: [Partials.Channel], // تمكين "partials" للقنوات الخاصة
+
+const bot = new Telegraf(process.env['token']); // استبدل بـ 'YOUR_BOT_TOKEN'
+// معرف المستخدم المسموح له فقط
+const OWNER_ID = process.env['id']; // استبدل بـ 'YOUR_USER_ID'
+
+bot.start((ctx) => {
+    if (ctx.from.id === OWNER_ID) {
+        ctx.reply('👋 مرحبًا! أرسل الرابط الذي تريد البحث فيه.');
+    } else {
+        ctx.reply('🚫 لا يمكنك استخدام هذا البوت.');
+    }
 });
 
-const translateStatus = (status) => {
-    switch (status.toLowerCase()) {
-        case 'finished':
-            return 'مُكتمل';
-        case 'releasing':
-            return 'مُستمر';
-        case 'not_yet_released':
-            return 'لم يُعرض بعد';
-        case 'cancelled':
-            return 'ملغي';
-        default:
-            return 'أخرى';
-    }
-};
-
-client.once('ready', () => {
-    console.log(`Logged in as ${client.user.tag}!`);
-});
-
-let listening = false;
-let processingImage = false;
-let cooldown = false;
-
-client.on('messageCreate', async message => {
-    if (message.author.bot) return;
-
-    // التحقق من أن الرسالة تأتي من الخاص
-    if (message.guild) {
-        return message.reply("❌ يرجى التوجه للخاص.");
+bot.on('text', async (ctx) => {
+    if (ctx.from.id !== OWNER_ID) {
+        return; // تجاهل الرسائل من غير مالك البوت
     }
 
-    // التحقق من فترة التبريد
-    if (cooldown) {
-        return message.channel.send("⚠️ يرجى الانتظار 16 ثانية قبل إعادة استخدام البوت.");
+    const url = ctx.message.text;
+
+    if (!url.startsWith('https://arabtoons.net/manga/')) {
+        ctx.reply('🔗 يرجى إرسال رابط من موقع arabtoons.net فقط.');
+        return;
     }
 
-    // إذا تم إرسال الأمر !start
-    if (message.content === '!start' && !listening) {
-        listening = true;
-        message.channel.send("🕒 سأستمع إلى الصور لمدة 1 دقيقة...");
+    try {
+        const chapters = await getChaptersFromArabToons(url);
 
-        // تعيين مؤقت لمدة 1 دقيقة
-        setTimeout(() => {
-            listening = false;
-            message.channel.send("⏲️ انتهت المدة! لن أستمع إلى الصور بعد الآن.");
-        }, 60000); // 60000 ميلي ثانية تساوي 1 دقيقة
-    } else if (message.content === '!start' && listening) {
-        return message.channel.send("🔄 يتم الاستماع للصور بالفعل.");
-    }
-
-    // التعامل مع الصور المرسلة
-    if (listening && message.attachments.size > 0) {
-        if (processingImage) {
-            return message.channel.send("⚠️ جاري معالجة صورة بالفعل، يرجى الانتظار.");
+        if (chapters.length === 0) {
+            ctx.reply('❌ لم يتم العثور على أي فصول.');
+            return;
         }
 
-        processingImage = true;
+        const filePath = path.join(__dirname, 'chapters.html');
+        const writeStream = fs.createWriteStream(filePath);
 
-        const attachment = message.attachments.first();
-        const fileUrl = attachment.url;
-
-        try {
-            message.channel.send("📸 جاري معالجة الصورة...");
-
-            // استدعاء API موقع trace.moe
-            const traceMoeResponse = await axios.get('https://api.trace.moe/search', {
-                params: {
-                    url: fileUrl
-                }
-            });
-
-            const traceData = traceMoeResponse.data.result[0];
-
-            if (!traceData.anilist) {
-                throw new Error("لم يتم العثور على ID الخاص بـ AniList.");
-            }
-
-            const anilistId = traceData.anilist;
-
-            // استدعاء API موقع AniList للحصول على تفاصيل الأنمي
-            const anilistResponse = await axios.post('https://graphql.anilist.co', {
-                query: `
-                query ($id: Int) {
-                    Media(id: $id, type: ANIME) {
-                        title {
-                            romaji
-                            english
-                            native
-                        }
-                        status
-                        startDate {
-                            year
-                        }
+        writeStream.write(`
+            <!DOCTYPE html>
+            <html lang="ar">
+            <head>
+                <meta charset="UTF-8">
+                <meta name="viewport" content="width=device-width, initial-scale=1.0">
+                <title>فصول المانجا</title>
+                <style>
+                    body {
+                        background-color: #121212;
+                        color: #ffffff;
+                        font-family: 'Segoe UI', Tahoma, Geneva, Verdana, sans-serif;
+                        margin: 0;
+                        padding: 0;
+                        display: flex;
+                        flex-direction: column;
+                        align-items: center;
+                        overflow-x: hidden;
+                        overflow-y: auto;
                     }
-                }
-                `,
-                variables: {
-                    id: anilistId
-                }
+                    h2 {
+                        font-size: 24px;
+                        margin: 20px 0;
+                        text-align: center;
+                        border-bottom: 3px solid #ffffff;
+                        padding-bottom: 10px;
+                        width: 100%;
+                        max-width: 800px;
+                        color: #ffffff;
+                    }
+                    img {
+                        display: block;
+                        width: 100vw;
+                        height: auto;
+                        margin: 0;
+                        padding: 0;
+                        border: none;
+                        object-fit: contain;
+                    }
+                    .container {
+                        width: 100vw; /* ملء عرض الشاشة بالكامل */
+                        max-width: 100%;
+                        margin: 0;
+                        padding: 0;
+                        text-align: center;
+                    }
+                    .fullscreen-button {
+                        position: fixed;
+                        top: 10px;
+                        right: 10px;
+                        background-color: #ffffff;
+                        color: #121212;
+                        border: none;
+                        padding: 10px;
+                        cursor: pointer;
+                        font-size: 16px;
+                        border-radius: 5px;
+                        z-index: 1000;
+                        transition: opacity 0.3s ease, transform 0.3s ease;
+                    }
+                    .fullscreen-button.hidden {
+                        opacity: 0;
+                        pointer-events: none;
+                    }
+                    .fullscreen-button:focus {
+                        outline: none;
+                    }
+                </style>
+            </head>
+            <body>
+                <button id="fullscreen-button" class="fullscreen-button">شاشة كاملة</button>
+                <div class="container">
+        `);
+
+        for (const chapter of chapters) {
+            writeStream.write(`<h2>فصل ${chapter.title}</h2>`);
+
+            const chapterResponse = await axios.get(chapter.url);
+            const $ = cheerio.load(chapterResponse.data);
+
+            $('div.page-break img.wp-manga-chapter-img').each((i, element) => {
+                const imgSrc = $(element).attr('src').trim();
+                writeStream.write(`<img src="${imgSrc}" alt="Chapter Image">`);
             });
-
-            const animeData = anilistResponse.data.data.Media;
-            const titles = [animeData.title.romaji, animeData.title.english, animeData.title.native].filter(Boolean);
-            const mainTitle = titles.shift();
-            const otherTitles = titles.map(title => `\`${title}\``).join('، ');
-
-            const status = translateStatus(animeData.status);
-            const year = animeData.startDate.year;
-
-            const messageContent = `
-📺 *اسم الأنمي:* \`${mainTitle}\`
-*أسماء أخرى:* \n${otherTitles}
-🎥 *الحالة:* ${status}
-📅 *سنة الإنتاج:* ${year}
-🕒 *الحلقة:* ${traceData.episode}
-⏱ *الوقت:* ${new Date(traceData.from * 1000).toISOString().substr(11, 8)}
-
-هذه ليس الانمي الذي تبحث عنه؟ \nأذن توجه هنا : \`https://shorturl.at/lDMF3\`\n\nقد تكون هذه النتائج غير صحيحة.`;
-
-            const videoUrl = traceData.video;
-            const tempFileName = `${uuidv4()}.mp4`;
-            const videoPath = path.join(__dirname, tempFileName);
-
-            const videoStream = await axios({
-                url: videoUrl,
-                responseType: 'stream'
-            });
-
-            videoStream.data.pipe(fs.createWriteStream(videoPath));
-
-            await new Promise((resolve) => {
-                videoStream.data.on('end', resolve);
-            });
-
-            await message.channel.send({ content: messageContent, files: [videoPath] });
-
-            fs.unlinkSync(videoPath);
-
-        } catch (error) {
-            console.error('حدث خطأ: ', error.message);
-            message.channel.send(`⚠️ حدث خطأ أثناء معالجة الصورة: ${error.message}`);
-        } finally {
-            processingImage = false;
-            cooldown = true;
-
-            // تفعيل فترة التبريد لمدة 16 ثانية
-            setTimeout(() => {
-                cooldown = false;
-            }, 16000);
         }
+
+        writeStream.write(`
+                </div>
+                <script>
+                    document.addEventListener("DOMContentLoaded", function() {
+                        const fullscreenButton = document.getElementById("fullscreen-button");
+                        fullscreenButton.addEventListener("click", () => {
+                            if (!document.fullscreenElement) {
+                                document.documentElement.requestFullscreen();
+                                fullscreenButton.textContent = "إلغاء الشاشة الكاملة";
+                            } else {
+                                document.exitFullscreen();
+                                fullscreenButton.textContent = "شاشة كاملة";
+                            }
+                        });
+
+                        // Show/hide fullscreen button on scroll
+                        let scrollTimeout;
+                        window.addEventListener("scroll", () => {
+                            fullscreenButton.classList.add("hidden");
+                            clearTimeout(scrollTimeout);
+                            scrollTimeout = setTimeout(() => {
+                                fullscreenButton.classList.remove("hidden");
+                            }, 2000);
+                        });
+                    });
+                </script>
+            </body>
+            </html>
+        `);
+
+        writeStream.end();
+
+        writeStream.on('finish', async () => {
+            await ctx.replyWithDocument({ source: filePath });
+            fs.unlinkSync(filePath);
+        });
+
+    } catch (error) {
+        console.error(error);
+        ctx.reply('❌ حدث خطأ أثناء محاولة الوصول إلى الرابط.');
     }
 });
 
-// بدء تشغيل البوت
+async function getChaptersFromArabToons(url) {
+    const response = await axios.get(url);
+    const $ = cheerio.load(response.data);
+
+    const chapters = [];
+    $('ul.main.version-chap.no-volumn li.wp-manga-chapter').each((i, element) => {
+        const chapterUrl = $(element).find('a').attr('href');
+        chapters.push({ url: chapterUrl, title: $(element).text().trim() });
+    });
+
+    return chapters.reverse(); // ترتيب الفصول من الفصل 1 إلى الأخير
+}
 keepAlive();
-client.login( process.env['token']);
+bot.launch();
