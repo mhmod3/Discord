@@ -5,10 +5,13 @@ const fs = require('fs');
 const path = require('path');
 const keepAlive = require('./keep_alive.js');
 
-// إعداد axios مع User-Agent لمحاكاة متصفح حقيقي
+// إعداد axios مع ترويسات إضافية لمحاكاة متصفح حقيقي
 const axiosInstance = axios.create({
     headers: {
-        'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/91.0.4472.124 Safari/537.36'
+        'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/91.0.4472.124 Safari/537.36',
+        'Accept': 'text/html,application/xhtml+xml,application/xml;q=0.9,image/webp,image/apng,*/*;q=0.8',
+        'Accept-Language': 'en-US,en;q=0.5',
+        'Referer': 'https://arabtoons.net/',
     }
 });
 
