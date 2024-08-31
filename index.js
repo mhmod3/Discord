@@ -6,9 +6,8 @@ const path = require('path');
 const keepAlive = require('./keep_alive.js');
 
 
-const bot = new Telegraf(process.env['token']); // استبدل بـ 'YOUR_BOT_TOKEN'
-// معرف المستخدم المسموح له فقط
-const OWNER_ID = process.env['id']; // استبدل بـ 'YOUR_USER_ID'
+const bot = new Telegraf(process.env['token']);
+const OWNER_ID = 6371657768; // استبدل بـ 'YOUR_USER_ID'
 
 bot.start((ctx) => {
     if (ctx.from.id === OWNER_ID) {
