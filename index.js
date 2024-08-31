@@ -5,6 +5,12 @@ const fs = require('fs');
 const path = require('path');
 const keepAlive = require('./keep_alive.js');
 
+// إعداد axios مع User-Agent لمحاكاة متصفح حقيقي
+const axiosInstance = axios.create({
+    headers: {
+        'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/91.0.4472.124 Safari/537.36'
+    }
+});
 
 const bot = new Telegraf(process.env['token']);
 const OWNER_ID = 6371657768; // استبدل بـ 'YOUR_USER_ID'
@@ -117,7 +123,7 @@ bot.on('text', async (ctx) => {
         for (const chapter of chapters) {
             writeStream.write(`<h2>فصل ${chapter.title}</h2>`);
 
-            const chapterResponse = await axios.get(chapter.url);
+            const chapterResponse = await axiosInstance.get(chapter.url);
             const $ = cheerio.load(chapterResponse.data);
 
             $('div.page-break img.wp-manga-chapter-img').each((i, element) => {
@@ -170,7 +176,7 @@ bot.on('text', async (ctx) => {
 });
 
 async function getChaptersFromArabToons(url) {
-    const response = await axios.get(url);
+    const response = await axiosInstance.get(url);
     const $ = cheerio.load(response.data);
 
     const chapters = [];
@@ -181,5 +187,6 @@ async function getChaptersFromArabToons(url) {
 
     return chapters.reverse(); // ترتيب الفصول من الفصل 1 إلى الأخير
 }
+
 keepAlive();
 bot.launch();
